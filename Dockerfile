@@ -1,46 +1,23 @@
-# Copyright 2020 - 2021 MONAI Consortium
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#     http://www.apache.org/licenses/LICENSE-2.0
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+FROM ubuntu:20.04
 
-# To build with a different base image
-# please run `./runtests.sh --clean && DOCKER_BUILDKIT=1 docker build -t projectmonai/monailabel:latest .`
-# to use different version of MONAI pass `--build-arg MONAI_IMAGE=...`
-# to exclude ORTHANC pass `--build-arg ORTHANC=false`
+RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
+    python3.8 python3-pip python3-setuptools python3-dev \
+    g++ gcc \
+    python-is-python3 \
+    git
 
-ARG MONAI_IMAGE=projectmonai/monai:latest
-ARG ORTHANC=false
+RUN rm -rf /var/cache/apt/* /var/lib/apt/lists/* && \
+    apt-get autoremove -y && apt-get clean
 
-FROM ${MONAI_IMAGE} as build
-LABEL maintainer="monai.contact@gmail.com"
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    pip3 install --no-cache-dir monailabel numpy
 
-ADD . /opt/monailabel/
-RUN apt update -y && apt install npm -y && npm install --global yarn
-RUN python -m pip install --upgrade --no-cache-dir pip setuptools wheel twine \
-    && cd /opt/monailabel \
-    && python setup.py sdist bdist_wheel --build-number $(date +'%Y%m%d%H%M')
+WORKDIR /usr
 
-FROM ${MONAI_IMAGE}
-LABEL maintainer="monai.contact@gmail.com"
+RUN git clone https://github.com/Project-MONAI/MONAILabel
+RUN mv MONAILabel monailabel
 
-COPY --from=build /opt/monailabel/dist/monailabel* /opt/monailabel/dist/
-RUN python -m pip install --upgrade --no-cache-dir pip \
-    && python -m pip install /opt/monailabel/dist/monailabel*.whl
-RUN python3 -m pip install numpy --upgrade
+RUN monailabel apps --download --name deepedit --output /usr/monailabel/apps
+RUN monailabel datasets --download --name Task09_Spleen --output /usr/monailabel/datasets
 
-# Add Orthanc
-RUN if [ "${ORTHANC}" = "true" ] ; then  \
-    apt-get update -y && apt-get install orthanc orthanc-dicomweb plastimatch -y \
-    && service orthanc stop \
-    && wget https://lsb.orthanc-server.com/orthanc/1.9.6/Orthanc --output-document /usr/sbin/Orthanc \
-    && rm -f /usr/share/orthanc/plugins/*.so \
-    && wget https://lsb.orthanc-server.com/orthanc/1.9.6/libServeFolders.so --output-document /usr/share/orthanc/plugins/libServeFolders.so \
-    && wget https://lsb.orthanc-server.com/orthanc/1.9.6/libModalityWorklists.so --output-document /usr/share/orthanc/plugins/libModalityWorklists.so \
-    && wget https://lsb.orthanc-server.com/plugin-dicom-web/1.6/libOrthancDicomWeb.so --output-document /usr/share/orthanc/plugins/libOrthancDicomWeb.so \
-    && service orthanc restart; fi
+ENTRYPOINT monailabel start_server --app /usr/monailabel/apps/deepedit --studies /usr/monailabel/datasets/Task09_Spleen/imagesTr
